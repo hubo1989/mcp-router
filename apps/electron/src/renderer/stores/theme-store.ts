@@ -42,6 +42,12 @@ function applyTheme(theme: Theme) {
   } else {
     root.classList.add(theme);
   }
+
+  // Notify main process to align nativeTheme.themeSource (Windows caption buttons)
+  const api = (window as any).electronAPI;
+  if (api?.setThemeSource) {
+    api.setThemeSource(theme);
+  }
 }
 
 // Initialize theme on module load

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, session, shell } from "electron";
+import { app, BrowserWindow, session, shell, nativeTheme } from "electron";
 import path from "node:path";
 import { MCPServerManager } from "@/main/modules/mcp-server-manager/mcp-server-manager";
 import { AggregatorServer } from "@/main/modules/mcp-server-runtime/aggregator-server";
@@ -136,6 +136,29 @@ const createWindow = () => {
 
   // Create the browser window.
   mainWindow = new BrowserWindow(windowOptions);
+
+  // Apply Windows title bar overlay colors based on system theme
+  if (process.platform === "win32" && mainWindow) {
+    const applyTitleBarColors = () => {
+      if (!mainWindow) return;
+      const isDark = nativeTheme.shouldUseDarkColors;
+      const isHighContrast = nativeTheme.shouldUseHighContrastColors;
+      const overlayColor = isHighContrast
+        ? "#00000000" // transparent in high contrast, let OS handle
+        : isDark
+        ? "#0a0a0a"
+        : "#ffffff";
+      const symbolColor = isHighContrast ? undefined : isDark ? "#ffffff" : "#000000";
+      mainWindow.setTitleBarOverlay({
+        color: overlayColor,
+        symbolColor,
+        height: 50,
+      });
+    };
+
+    applyTitleBarColors();
+    nativeTheme.on("updated", applyTitleBarColors);
+  }
 
   mainWindow.loadURL(MAIN_WINDOW_WEBPACK_ENTRY);
 

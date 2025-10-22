@@ -1,4 +1,4 @@
-import { ipcMain, app, autoUpdater } from "electron";
+import { ipcMain, app, autoUpdater, nativeTheme } from "electron";
 import { commandExists } from "@/main/utils/env-utils";
 import { API_BASE_URL, mainWindow } from "@/main";
 
@@ -18,6 +18,17 @@ export function setupSystemHandlers(): void {
   // System info and commands
   ipcMain.handle("system:getPlatform", () => {
     return process.platform;
+  });
+
+  // Bridge renderer theme selection to main (Windows caption buttons & OS theme)
+  ipcMain.handle("ui:set-theme-source", (_e, theme: "light" | "dark" | "system") => {
+    try {
+      nativeTheme.themeSource = theme;
+      return true;
+    } catch (error) {
+      console.error("Failed to set theme source:", error);
+      return false;
+    }
   });
 
   // Check if a command exists in user shell environment

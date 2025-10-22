@@ -275,4 +275,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.removeListener("workspace:switched", listener);
     };
   },
+  // Conversion Queue Monitoring
+  onConversionUpdate: (callback: (job: any) => void) => {
+    const listener = (_: any, job: any) => callback(job);
+    ipcRenderer.on("conversion:update", listener);
+    return () => {
+      ipcRenderer.removeListener("conversion:update", listener);
+    };
+  },
+  getConversionStatus: (jobId: string) =>
+    ipcRenderer.invoke("conversion:status", jobId),
+  setThemeSource: (theme: "light" | "dark" | "system") => ipcRenderer.invoke("ui:set-theme-source", theme),
 });
