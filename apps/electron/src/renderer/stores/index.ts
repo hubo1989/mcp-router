@@ -39,7 +39,7 @@ export const initializeStores = async () => {
 
   // Initialize theme from settings
   try {
-    initializeThemeStore(useThemeStore, getPlatformAPI);
+    await initializeThemeStore(useThemeStore, getPlatformAPI);
   } catch (error) {
     console.error("Failed to initialize theme from settings:", error);
   }
