@@ -149,6 +149,9 @@ const createWindow = ({ showOnCreate = true }: CreateWindowOptions = {}) => {
 
     applyTitleBarColors();
     nativeTheme.on("updated", applyTitleBarColors);
+    mainWindow.on("closed", () => {
+      nativeTheme.removeListener("updated", applyTitleBarColors);
+    });
   }
 
   mainWindow.once("ready-to-show", () => {
