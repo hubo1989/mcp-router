@@ -125,7 +125,7 @@ const createWindow = ({ showOnCreate = true }: CreateWindowOptions = {}) => {
   mainWindow = new BrowserWindow(windowOptions);
 
   // Apply Windows title bar overlay colors based on system theme
-  if (process.platform === "win32" && mainWindow) {
+  if (process.platform === "win32") {
     const applyTitleBarColors = () => {
       if (!mainWindow) return;
       const isDark = nativeTheme.shouldUseDarkColors;
