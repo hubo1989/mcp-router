@@ -6,7 +6,6 @@ import type { PlatformAPI } from "@mcp_router/shared";
 import type {
   AuthAPI,
   ServerAPI,
-  AgentAPI,
   AppAPI,
   PackageAPI,
   SettingsAPI,
@@ -14,19 +13,20 @@ import type {
   WorkspaceAPI,
   WorkflowAPI,
   Workspace,
+  ProjectsAPI,
 } from "@mcp_router/shared";
 
 // Electron implementation of the Platform API
 class ElectronPlatformAPI implements PlatformAPI {
   auth: AuthAPI;
   servers: ServerAPI;
-  agents: AgentAPI;
   apps: AppAPI;
   packages: PackageAPI;
   settings: SettingsAPI;
   logs: LogAPI;
   workspaces: WorkspaceAPI;
   workflows: WorkflowAPI;
+  projects: ProjectsAPI;
 
   constructor() {
     // Initialize auth domain
@@ -55,6 +55,7 @@ class ElectronPlatformAPI implements PlatformAPI {
     // Initialize servers domain
     this.servers = {
       list: () => window.electronAPI.listMcpServers(),
+      listTools: (id) => window.electronAPI.listMcpServerTools(id),
       get: async (id) => {
         const servers = await window.electronAPI.listMcpServers();
         return servers.find((s: any) => s.id === id) || null;
@@ -62,6 +63,8 @@ class ElectronPlatformAPI implements PlatformAPI {
       create: (input) => window.electronAPI.addMcpServer(input),
       update: (id, updates) =>
         window.electronAPI.updateMcpServerConfig(id, updates),
+      updateToolPermissions: (id, permissions) =>
+        window.electronAPI.updateToolPermissions(id, permissions),
       delete: (id) => window.electronAPI.removeMcpServer(id),
       start: (id) => window.electronAPI.startMcpServer(id),
       stop: (id) => window.electronAPI.stopMcpServer(id),
@@ -73,110 +76,13 @@ class ElectronPlatformAPI implements PlatformAPI {
       selectFile: (options) => window.electronAPI.serverSelectFile(options),
     };
 
-    // Initialize agents domain (with chat functionality)
-    this.agents = {
-      // Agent management
-      list: () => window.electronAPI.listAgents(),
-      get: async (id) => {
-        const agent = await window.electronAPI.getAgent(id);
-        return agent || null;
-      },
-      create: (input) => window.electronAPI.createAgent(input),
-      update: async (id, updates) => {
-        const agent = await window.electronAPI.updateAgent(id, updates);
-        if (!agent) throw new Error("Agent not found");
-        return agent;
-      },
-      delete: (id) => window.electronAPI.deleteAgent(id),
-      share: (id) => window.electronAPI.shareAgent(id),
-      import: (shareCode) => window.electronAPI.importAgent(shareCode),
-
-      // Deployment
-      deploy: async (id) => {
-        const deployedAgent = await window.electronAPI.deployAgent(id);
-        return {
-          success: !!deployedAgent,
-          deployedAgent,
-          error: deployedAgent ? undefined : "Deployment failed",
-        };
-      },
-      getDeployed: async () => {
-        const deployed = await window.electronAPI.getDeployedAgents();
-        return deployed || [];
-      },
-      updateDeployed: (id, config) =>
-        window.electronAPI.updateDeployedAgent(id, config),
-      deleteDeployed: (id) => window.electronAPI.deleteDeployedAgent(id),
-
-      // Tool management
-      tools: {
-        execute: async (agentId, toolName, args) => {
-          const result = await window.electronAPI.executeAgentTool(
-            agentId,
-            toolName,
-            args,
-          );
-          return result;
-        },
-        list: async (agentId, serverId, isDev) => {
-          const result = await window.electronAPI.getAgentMCPServerTools(
-            agentId,
-            serverId,
-            isDev,
-          );
-          return result;
-        },
-      },
-
-      // Session management
-      sessions: {
-        create: (agentId, initialMessages) =>
-          window.electronAPI.createSession(agentId, initialMessages),
-        list: (agentId, options) =>
-          window.electronAPI.getSessions(agentId, options),
-        delete: (sessionId) => window.electronAPI.deleteSession(sessionId),
-        update: async (sessionId, messages) => {
-          await window.electronAPI.updateSessionMessages(sessionId, messages);
-          return {
-            id: sessionId,
-            agentId: "",
-            messages,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          };
-        },
-      },
-
-      // Streaming chat
-      stream: {
-        start: (data) => window.electronAPI.sendChatStreamStart(data),
-        send: (data) => window.electronAPI.sendChatStreamChunk(data),
-        end: (data) => window.electronAPI.sendChatStreamEnd(data),
-        error: (data) => window.electronAPI.sendChatStreamError(data),
-        onStart: (callback) => window.electronAPI.onChatStreamStart(callback),
-        onChunk: (callback) => window.electronAPI.onChatStreamChunk(callback),
-        onEnd: (callback) => window.electronAPI.onChatStreamEnd(callback),
-        onError: (callback) => window.electronAPI.onChatStreamError(callback),
-      },
-
-      // Background chat
-      background: {
-        start: (sessionId, agentId, query) =>
-          window.electronAPI.startBackgroundChat(sessionId, agentId, query),
-        stop: (agentId) => window.electronAPI.stopBackgroundChat(agentId),
-        onStart: (callback) =>
-          window.electronAPI.onBackgroundChatStart(callback),
-        onStop: (callback) => window.electronAPI.onBackgroundChatStop(callback),
-      },
-    };
-
     // Initialize apps domain (with token management)
     this.apps = {
       list: () => window.electronAPI.listMcpApps(),
       create: (appName) => window.electronAPI.addMcpAppConfig(appName),
       delete: (appName) => window.electronAPI.deleteMcpApp(appName),
-      updateServerAccess: (appName, serverIds) =>
-        window.electronAPI.updateAppServerAccess(appName, serverIds),
+      updateServerAccess: (appName, serverAccess) =>
+        window.electronAPI.updateAppServerAccess(appName, serverAccess),
       unifyConfig: (appName) => window.electronAPI.unifyAppConfig(appName),
 
       // Token management
@@ -294,6 +200,14 @@ class ElectronPlatformAPI implements PlatformAPI {
         import: (module) => window.electronAPI.importHookModule(module),
         validate: (script) => window.electronAPI.validateHookScript(script),
       },
+    };
+
+    // Initialize projects domain
+    this.projects = {
+      list: () => window.electronAPI.listProjects(),
+      create: (input) => window.electronAPI.createProject(input),
+      update: (id, updates) => window.electronAPI.updateProject(id, updates),
+      delete: (id) => window.electronAPI.deleteProject(id),
     };
   }
 }

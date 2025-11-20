@@ -24,6 +24,7 @@ const Settings: React.FC = () => {
     useState<boolean>(true);
   const [analyticsEnabled, setAnalyticsEnabled] = useState<boolean>(true);
   const [autoUpdateEnabled, setAutoUpdateEnabled] = useState<boolean>(true);
+  const [showWindowOnStartup, setShowWindowOnStartup] = useState<boolean>(true);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
 
   // Zustand stores
@@ -73,6 +74,7 @@ const Settings: React.FC = () => {
         setLoadExternalMCPConfigs(settings.loadExternalMCPConfigs ?? true);
         setAnalyticsEnabled(settings.analyticsEnabled ?? true);
         setAutoUpdateEnabled(settings.autoUpdateEnabled ?? true);
+        setShowWindowOnStartup(settings.showWindowOnStartup ?? true);
       } catch {
         // Ignore error and use default value
         console.log("Failed to load settings, using defaults");
@@ -188,6 +190,26 @@ const Settings: React.FC = () => {
       console.error("Failed to save auto update settings:", error);
       // Revert on error
       setAutoUpdateEnabled(!checked);
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
+
+  // Handle startup visibility toggle
+  const handleStartupVisibilityToggle = async (checked: boolean) => {
+    setShowWindowOnStartup(checked);
+    setIsSavingSettings(true);
+
+    try {
+      const currentSettings = await platformAPI.settings.get();
+      await platformAPI.settings.save({
+        ...currentSettings,
+        showWindowOnStartup: checked,
+      });
+    } catch (error) {
+      console.error("Failed to save startup visibility settings:", error);
+      // Revert on error
+      setShowWindowOnStartup(!checked);
     } finally {
       setIsSavingSettings(false);
     }
@@ -330,9 +352,6 @@ const Settings: React.FC = () => {
                       {userInfo?.creditBalance || 0}
                     </Badge>
                   </div>
-                  <p className="text-xs text-green-600 dark:text-green-400">
-                    {t("settings.freeCreditsDescription")}
-                  </p>
                 </div>
 
                 {/* Paid Credits Card */}
@@ -452,6 +471,21 @@ const Settings: React.FC = () => {
             <Switch
               checked={autoUpdateEnabled}
               onCheckedChange={handleAutoUpdateToggle}
+              disabled={isSavingSettings}
+            />
+          </div>
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <label className="text-sm font-medium">
+                {t("settings.showWindowOnStartup")}
+              </label>
+              <p className="text-xs text-muted-foreground">
+                {t("settings.showWindowOnStartupDescription")}
+              </p>
+            </div>
+            <Switch
+              checked={showWindowOnStartup}
+              onCheckedChange={handleStartupVisibilityToggle}
               disabled={isSavingSettings}
             />
           </div>

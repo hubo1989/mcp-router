@@ -1,6 +1,6 @@
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { MCPServer } from "@mcp_router/shared";
+import { MCPServer, UNASSIGNED_PROJECT_ID } from "@mcp_router/shared";
 import {
   parseResourceUri,
   createResourceUri,
@@ -15,14 +15,7 @@ import { RequestHandlerBase } from "./request-handler-base";
  */
 export class RequestHandlers extends RequestHandlerBase {
   private originalProtocols: Map<string, string> = new Map();
-  private toolRoutingMap: Map<
-    string,
-    {
-      serverName: string;
-      originalName: string;
-    }
-  > = new Map();
-  private legacyToolNameToServerMap: Map<string, string> = new Map();
+  private toolNameToServerMap: Map<string, Map<string, string>> = new Map();
   private serverStatusMap: Map<string, boolean>;
   private servers: Map<string, MCPServer>;
   private clients: Map<string, Client>;
@@ -40,22 +33,55 @@ export class RequestHandlers extends RequestHandlerBase {
     this.serverStatusMap = maps.serverStatusMap;
   }
 
-  /**
-   * Initialize Agent Tools virtual server
-   */
-  public initAgentToolsServer(): void {
-    const agentServerName = "Agent Tools";
-    this.serverStatusMap.set(agentServerName, true);
+  private normalizeProjectId(projectId: unknown): string | null {
+    if (
+      projectId === undefined ||
+      projectId === null ||
+      projectId === "" ||
+      projectId === UNASSIGNED_PROJECT_ID
+    ) {
+      return null;
+    }
+    if (typeof projectId === "string") {
+      return projectId;
+    }
+    return null;
+  }
+
+  private getProjectKey(projectId: string | null): string {
+    return projectId ?? UNASSIGNED_PROJECT_ID;
+  }
+
+  private ensureToolMap(projectId: string | null): Map<string, string> {
+    const key = this.getProjectKey(projectId);
+    let map = this.toolNameToServerMap.get(key);
+    if (!map) {
+      map = new Map();
+      this.toolNameToServerMap.set(key, map);
+    }
+    return map;
+  }
+
+  private matchesProject(
+    server: MCPServer | undefined,
+    projectId: string | null,
+  ): boolean {
+    const serverProject = server?.projectId ?? null;
+    return projectId === null || serverProject === projectId;
   }
 
   /**
    * Handle a request to list all tools from all servers
    */
-  public async handleListTools(token?: string): Promise<any> {
+  public async handleListTools(
+    token?: string,
+    projectIdInput?: unknown,
+  ): Promise<any> {
     const clientId = this.getClientId(token);
+    const projectId = this.normalizeProjectId(projectIdInput);
 
     return this.executeWithHooks("tools/list", {}, clientId, async () => {
-      const allTools = await this.getAllToolsInternal();
+      const allTools = await this.getAllToolsInternal(token, projectId);
       return { tools: allTools };
     });
   }
@@ -66,20 +92,23 @@ export class RequestHandlers extends RequestHandlerBase {
   public async handleCallTool(request: any): Promise<any> {
     const toolName = request.params.name;
 
+    const projectId = this.normalizeProjectId(request.params._meta?.projectId);
+
     // Get server name and original tool name
-    const routingInfo = this.toolRoutingMap.get(toolName);
-    const serverName =
-      routingInfo?.serverName ||
-      this.legacyToolNameToServerMap.get(toolName) ||
-      "Agent Tools";
-    const originalToolName = routingInfo?.originalName || toolName;
-
     const token = request.params._meta?.token as string | undefined;
-
-    // Check if this is an agent tool first
-    if (serverName === "Agent Tools") {
-      return this.handleAgentToolCall(toolName, request.params.arguments || {});
+    const mappedServerName = await this.getServerNameForTool(
+      toolName,
+      token,
+      projectId,
+    );
+    if (!mappedServerName) {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        `Could not determine server for tool: ${toolName}`,
+      );
     }
+    const serverName = mappedServerName;
+    const originalToolName = toolName;
 
     // Validate token and get client ID for regular servers
     const clientId = this.tokenValidator.validateTokenAndAccess(
@@ -95,6 +124,23 @@ export class RequestHandlers extends RequestHandlerBase {
       );
     }
 
+    const server = this.servers.get(serverId);
+    if (!this.matchesProject(server, projectId)) {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        "Tool not available for the selected project",
+      );
+    }
+
+    if (
+      server?.toolPermissions &&
+      server.toolPermissions[originalToolName] === false
+    ) {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        `Tool "${originalToolName}" is disabled for this server`,
+      );
+    }
     const client = this.clients.get(serverId);
     if (!client) {
       throw new McpError(
@@ -118,10 +164,17 @@ export class RequestHandlers extends RequestHandlerBase {
       "CallTool",
       async () => {
         // Call the tool on the server
-        return await client.callTool({
-          name: originalToolName,
-          arguments: request.params.arguments || {},
-        });
+        return await client.callTool(
+          {
+            name: originalToolName,
+            arguments: request.params.arguments || {},
+          },
+          undefined,
+          {
+            timeout: 60 * 60 * 1000, // 60分
+            resetTimeoutOnProgress: true,
+          },
+        );
       },
       { serverId },
     );
@@ -130,20 +183,36 @@ export class RequestHandlers extends RequestHandlerBase {
   /**
    * Get all tools from all servers (internal implementation)
    */
-  private async getAllToolsInternal(): Promise<any[]> {
-    this.toolRoutingMap.clear();
-    this.legacyToolNameToServerMap.clear();
+  private async getAllToolsInternal(
+    token?: string,
+    projectId?: string | null,
+  ): Promise<any[]> {
+    const normalizedProjectId = this.normalizeProjectId(projectId);
+    const toolMap = this.ensureToolMap(normalizedProjectId);
+    toolMap.clear();
     const allTools: any[] = [];
 
     // Add tools from running servers
     for (const [serverId, client] of this.clients.entries()) {
-      const serverName = this.servers.get(serverId)?.name || serverId;
+      const server = this.servers.get(serverId);
+      const serverName = server?.name || serverId;
       const isRunning = this.serverStatusMap.get(serverName);
 
       if (!isRunning || !client) {
         continue;
       }
 
+      if (!this.matchesProject(server, normalizedProjectId)) {
+        continue;
+      }
+
+      if (token) {
+        try {
+          this.tokenValidator.validateTokenAndAccess(token, serverName);
+        } catch {
+          continue;
+        }
+      }
       try {
         // First, try to get the list of tools
         const tools = await client.listTools();
@@ -152,24 +221,24 @@ export class RequestHandlers extends RequestHandlerBase {
           continue;
         }
 
+        const permissions = (server?.toolPermissions ?? {}) as Record<
+          string,
+          boolean
+        >;
+
         for (const tool of tools.tools) {
-          const aggregatedName = this.buildAggregatedToolName(
-            serverName,
-            serverId,
-            tool.name,
-          );
+          if (permissions[tool.name] === false) {
+            continue;
+          }
+
           const toolWithSource = {
             ...tool,
-            name: aggregatedName,
+            name: tool.name,
             sourceServer: serverName,
           };
 
           // Store the mapping
-          this.toolRoutingMap.set(aggregatedName, {
-            serverName,
-            originalName: tool.name,
-          });
-          this.legacyToolNameToServerMap.set(tool.name, serverName);
+          toolMap.set(tool.name, serverName);
 
           allTools.push(toolWithSource);
         }
@@ -187,11 +256,15 @@ export class RequestHandlers extends RequestHandlerBase {
   /**
    * Handle a request to list all resources from all servers
    */
-  public async handleListResources(token?: string): Promise<any> {
+  public async handleListResources(
+    token?: string,
+    projectIdInput?: unknown,
+  ): Promise<any> {
     const clientId = this.getClientId(token);
+    const projectId = this.normalizeProjectId(projectIdInput);
 
     return this.executeWithHooks("resources/list", {}, clientId, async () => {
-      const allResources = await this.getAllResourcesInternal(token);
+      const allResources = await this.getAllResourcesInternal(token, projectId);
       return { resources: allResources };
     });
   }
@@ -199,14 +272,23 @@ export class RequestHandlers extends RequestHandlerBase {
   /**
    * Get all resources from all servers (internal implementation)
    */
-  private async getAllResourcesInternal(token?: string): Promise<any[]> {
+  private async getAllResourcesInternal(
+    token?: string,
+    projectId?: string | null,
+  ): Promise<any[]> {
+    const normalizedProjectId = this.normalizeProjectId(projectId);
     const allResources: any[] = [];
 
     for (const [serverId, client] of this.clients.entries()) {
-      const serverName = this.servers.get(serverId)?.name || serverId;
+      const server = this.servers.get(serverId);
+      const serverName = server?.name || serverId;
       const isRunning = this.serverStatusMap.get(serverName);
 
       if (!isRunning || !client) {
+        continue;
+      }
+
+      if (!this.matchesProject(server, normalizedProjectId)) {
         continue;
       }
 
@@ -261,8 +343,12 @@ export class RequestHandlers extends RequestHandlerBase {
   /**
    * Handle a request to list all resource templates
    */
-  public async handleListResourceTemplates(token?: string): Promise<any> {
+  public async handleListResourceTemplates(
+    token?: string,
+    projectIdInput?: unknown,
+  ): Promise<any> {
     const clientId = this.getClientId(token);
+    const projectId = this.normalizeProjectId(projectIdInput);
 
     return this.executeWithHooks(
       "resources/templates/list",
@@ -272,10 +358,15 @@ export class RequestHandlers extends RequestHandlerBase {
         const allTemplates: any[] = [];
 
         for (const [serverId, client] of this.clients.entries()) {
-          const serverName = this.servers.get(serverId)?.name || serverId;
+          const server = this.servers.get(serverId);
+          const serverName = server?.name || serverId;
           const isRunning = this.serverStatusMap.get(serverName);
 
           if (!isRunning || !client) {
+            continue;
+          }
+
+          if (!this.matchesProject(server, projectId)) {
             continue;
           }
 
@@ -329,8 +420,13 @@ export class RequestHandlers extends RequestHandlerBase {
   /**
    * Read a specific resource by its URI
    */
-  public async readResourceByUri(uri: string, token?: string): Promise<any> {
+  public async readResourceByUri(
+    uri: string,
+    token?: string,
+    projectIdInput?: unknown,
+  ): Promise<any> {
     const clientId = this.getClientId(token);
+    const projectId = this.normalizeProjectId(projectIdInput);
 
     // Parse the URI to get the server name and original URI
     const parsed = parseResourceUri(uri);
@@ -352,6 +448,14 @@ export class RequestHandlers extends RequestHandlerBase {
       throw new McpError(
         ErrorCode.InvalidRequest,
         `Unknown server: ${serverName}`,
+      );
+    }
+
+    const server = this.servers.get(serverId);
+    if (!this.matchesProject(server, projectId)) {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        "Resource not available for the selected project",
       );
     }
 
@@ -416,14 +520,23 @@ export class RequestHandlers extends RequestHandlerBase {
   /**
    * Get all prompts from all servers (internal implementation)
    */
-  public async getAllPromptsInternal(token?: string): Promise<any[]> {
+  public async getAllPromptsInternal(
+    token?: string,
+    projectIdInput?: unknown,
+  ): Promise<any[]> {
+    const projectId = this.normalizeProjectId(projectIdInput);
     const allPrompts: any[] = [];
 
     for (const [serverId, client] of this.clients.entries()) {
-      const serverName = this.servers.get(serverId)?.name || serverId;
+      const server = this.servers.get(serverId);
+      const serverName = server?.name || serverId;
       const isRunning = this.serverStatusMap.get(serverName);
 
       if (!isRunning || !client) {
+        continue;
+      }
+
+      if (!this.matchesProject(server, projectId)) {
         continue;
       }
 
@@ -473,8 +586,10 @@ export class RequestHandlers extends RequestHandlerBase {
     name: string,
     promptArgs?: any,
     token?: string,
+    projectIdInput?: unknown,
   ): Promise<any> {
     const clientId = this.getClientId(token);
+    const projectId = this.normalizeProjectId(projectIdInput);
 
     // Extract server name from the prefixed prompt name
     const parts = name.split("/");
@@ -498,6 +613,14 @@ export class RequestHandlers extends RequestHandlerBase {
       throw new McpError(
         ErrorCode.InvalidRequest,
         `Unknown server: ${serverName}`,
+      );
+    }
+
+    const server = this.servers.get(serverId);
+    if (!this.matchesProject(server, projectId)) {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        "Prompt not available for the selected project",
       );
     }
 
@@ -537,67 +660,27 @@ export class RequestHandlers extends RequestHandlerBase {
     );
   }
 
-  private buildAggregatedToolName(
-    serverName: string,
-    serverId: string,
+  /**
+   * Get server name for a given tool within the project scope
+   */
+  private async getServerNameForTool(
     toolName: string,
-  ): string {
-    const serverSlug =
-      this.slugify(serverName) || this.slugify(serverId) || "server";
-    const baseName = `mcp-router__${serverSlug}__${toolName}`;
+    token?: string,
+    projectId?: string | null,
+  ): Promise<string | undefined> {
+    const normalizedProjectId = this.normalizeProjectId(projectId);
+    const projectKey = this.getProjectKey(normalizedProjectId);
+    let toolMap = this.toolNameToServerMap.get(projectKey);
 
-    if (!this.toolRoutingMap.has(baseName)) {
-      return baseName;
+    if (!toolMap || !toolMap.has(toolName)) {
+      await this.getAllToolsInternal(token, normalizedProjectId);
+      toolMap = this.toolNameToServerMap.get(projectKey);
     }
 
-    let counter = 2;
-    let candidate = `${baseName}__${counter}`;
-    while (this.toolRoutingMap.has(candidate)) {
-      counter += 1;
-      candidate = `${baseName}__${counter}`;
-    }
-
-    return candidate;
+    return toolMap?.get(toolName);
   }
 
-  private slugify(value: string): string {
-    return value
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "");
-  }
-
-  /**
-   * Get server name for a given tool
-   */
-  public getServerNameForTool(toolName: string): string | undefined {
-    return (
-      this.toolRoutingMap.get(toolName)?.serverName ||
-      this.legacyToolNameToServerMap.get(toolName) ||
-      "Agent Tools"
-    );
-  }
-
-  /**
-   * Get server ID by name
-   */
   public getServerIdByName(name: string): string | undefined {
     return this.serverNameToIdMap.get(name);
-  }
-
-  /**
-   * Handle agent tool calls
-   */
-  public async handleAgentToolCall(toolName: string, args: any): Promise<any> {
-    // This would be implemented based on your agent tools logic
-    // For now, returning a placeholder
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Agent tool ${toolName} called with args: ${JSON.stringify(args)}`,
-        },
-      ],
-    };
   }
 }

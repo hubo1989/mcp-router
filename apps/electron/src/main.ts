@@ -12,13 +12,13 @@ import { getPlatformAPIManager } from "@/main/modules/workspace/platform-api-man
 import { getWorkspaceService } from "@/main/modules/workspace/workspace.service";
 import { getSharedConfigManager } from "@/main/infrastructure/shared-config-manager";
 import { setupIpcHandlers } from "./main/infrastructure/ipc";
+import { resolveAutoUpdateConfig } from "./main/modules/system/app-updator";
 import { getIsAutoUpdateInProgress } from "./main/modules/system/system-handler";
+import { initializeEnvironment, isDevelopment } from "@/main/utils/environment";
 import {
-  initializeEnvironment,
-  isDevelopment,
-  isProduction,
-} from "@/main/utils/environment";
-import { getSettingsService } from "@/main/modules/settings/settings.service";
+  applyLoginItemSettings,
+  getSettingsService,
+} from "@/main/modules/settings/settings.service";
 
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
@@ -56,7 +56,6 @@ if (started) app.quit();
 
 // Global references
 export let mainWindow: BrowserWindow | null = null;
-export let backgroundWindow: BrowserWindow | null = null;
 // Flag to track if app.quit() was explicitly called
 let isQuitting = false;
 // Timer for updating tray context menu
@@ -66,41 +65,27 @@ export const BASE_URL = "https://mcp-router.net/";
 export const API_BASE_URL = `${BASE_URL}api`;
 
 // Configure auto update (guarded to avoid crash on unsigned macOS builds)
-try {
-  const settingsService = getSettingsService();
-  const settings = settingsService.getSettings();
-  const autoUpdateEnabled = settings.autoUpdateEnabled ?? true;
+const { enabled: enableAutoUpdate, options: autoUpdateOptions } =
+  resolveAutoUpdateConfig();
 
-  const enableAutoUpdate =
-    isProduction() && app.isPackaged && autoUpdateEnabled;
-
-  if (enableAutoUpdate) {
-    updateElectronApp({
-      notifyUser: false,
-      updateInterval: "1 hour",
-    });
-  }
-} catch (err) {
-  console.warn("Auto update initialization skipped:", err);
+if (enableAutoUpdate && autoUpdateOptions) {
+  updateElectronApp(autoUpdateOptions);
 }
 
 // Declare global variables defined by Electron Forge
 declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string | undefined;
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
-declare const BACKGROUND_WINDOW_PRELOAD_WEBPACK_ENTRY: string | undefined;
-declare const BACKGROUND_WINDOW_WEBPACK_ENTRY: string;
 
 // グローバル変数の宣言（初期化は後で行う）
 let serverManager: MCPServerManager;
 let aggregatorServer: AggregatorServer;
 let mcpHttpServer: MCPHttpServer;
 
-// MCPServerManagerインスタンスを取得する関数をグローバルに公開
-(global as any).getMCPServerManager = () => serverManager;
-// AggregatorServerインスタンスを取得する関数をグローバルに公開
-(global as any).getAggregatorServer = () => aggregatorServer;
+type CreateWindowOptions = {
+  showOnCreate?: boolean;
+};
 
-const createWindow = () => {
+const createWindow = ({ showOnCreate = true }: CreateWindowOptions = {}) => {
   // Platform-specific window options
   const windowOptions: Electron.BrowserWindowConstructorOptions = {
     width: 1200,
@@ -110,6 +95,7 @@ const createWindow = () => {
     title: "MCP Router",
     icon: path.join(__dirname, "assets/icon.png"),
     autoHideMenuBar: true,
+    show: false,
     webPreferences: {
       preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
       contextIsolation: true,
@@ -146,9 +132,13 @@ const createWindow = () => {
       const overlayColor = isHighContrast
         ? "#00000000" // transparent in high contrast, let OS handle
         : isDark
-        ? "#0a0a0a"
-        : "#ffffff";
-      const symbolColor = isHighContrast ? undefined : isDark ? "#ffffff" : "#000000";
+          ? "#0a0a0a"
+          : "#ffffff";
+      const symbolColor = isHighContrast
+        ? undefined
+        : isDark
+          ? "#ffffff"
+          : "#000000";
       mainWindow.setTitleBarOverlay({
         color: overlayColor,
         symbolColor,
@@ -159,6 +149,18 @@ const createWindow = () => {
     applyTitleBarColors();
     nativeTheme.on("updated", applyTitleBarColors);
   }
+
+  mainWindow.once("ready-to-show", () => {
+    if (!mainWindow) {
+      return;
+    }
+
+    if (showOnCreate) {
+      mainWindow.show();
+    } else {
+      mainWindow.hide();
+    }
+  });
 
   mainWindow.loadURL(MAIN_WINDOW_WEBPACK_ENTRY);
 
@@ -193,36 +195,6 @@ const createWindow = () => {
 
   if (isDevelopment()) {
     mainWindow.webContents.openDevTools();
-  }
-};
-
-const createBackgroundWindow = () => {
-  // Create the background window for agent chat processing
-  backgroundWindow = new BrowserWindow({
-    width: isProduction() ? 1 : 800,
-    height: isProduction() ? 1 : 600,
-    show: isDevelopment(), // Show during development for debugging
-    frame: isDevelopment(),
-    skipTaskbar: isProduction(),
-    title: "Background Chat Window",
-    webPreferences: {
-      preload: BACKGROUND_WINDOW_PRELOAD_WEBPACK_ENTRY,
-      contextIsolation: true,
-      nodeIntegration: false,
-      devTools: isDevelopment(),
-    },
-  });
-
-  // Load the background renderer
-  backgroundWindow.loadURL(BACKGROUND_WINDOW_WEBPACK_ENTRY);
-
-  backgroundWindow.on("closed", () => {
-    backgroundWindow = null;
-  });
-
-  if (isDevelopment()) {
-    // Open dev tools for debugging background window
-    backgroundWindow.webContents.openDevTools();
   }
 };
 
@@ -277,6 +249,8 @@ async function initDatabase(): Promise<void> {
  */
 async function initMCPServices(): Promise<void> {
   // Platform APIマネージャーの初期化（ワークスペースDBを設定）
+  // MCPServerManager プロバイダを先に設定（serverManager は後で代入される）
+  getPlatformAPIManager().setServerManagerProvider(() => serverManager);
   await getPlatformAPIManager().initialize();
 
   // MCPServerManagerの初期化
@@ -287,7 +261,6 @@ async function initMCPServices(): Promise<void> {
 
   // AggregatorServerの初期化
   aggregatorServer = new AggregatorServer(serverManager);
-  aggregatorServer.initAgentToolsServer();
 
   // HTTPサーバーの初期化とスタート
   mcpHttpServer = new MCPHttpServer(serverManager, 3282, aggregatorServer);
@@ -304,17 +277,20 @@ async function initMCPServices(): Promise<void> {
 /**
  * ユーザーインターフェース関連の初期化を行う
  */
-function initUI(): void {
+function initUI({
+  showMainWindow = true,
+}: { showMainWindow?: boolean } = {}): void {
   // メインウィンドウ作成
-  createWindow();
+  createWindow({ showOnCreate: showMainWindow });
+
+  if (!showMainWindow && process.platform === "darwin" && app.dock) {
+    app.dock.hide();
+  }
 
   // Platform APIマネージャーにメインウィンドウを設定
   if (mainWindow) {
     getPlatformAPIManager().setMainWindow(mainWindow);
   }
-
-  // バックグラウンドウィンドウ作成
-  createBackgroundWindow();
 
   // システムトレイ作成
   createTray(serverManager);
@@ -353,12 +329,26 @@ async function initApplication(): Promise<void> {
   // アプリケーションメニューを設定
   setApplicationMenu();
 
-  // システム起動時の自動起動を設定
-  if (!app.getLoginItemSettings().openAtLogin) {
-    app.setLoginItemSettings({
-      openAtLogin: true,
-    });
+  // 起動時のウィンドウ表示設定を取得
+  const settingsService = getSettingsService();
+  let showWindowOnStartup = true;
+  try {
+    const currentSettings = settingsService.getSettings();
+    showWindowOnStartup = currentSettings.showWindowOnStartup ?? true;
+  } catch (error) {
+    console.error(
+      "Failed to load startup visibility preference, defaulting to true:",
+      error,
+    );
   }
+
+  const loginItemState = app.getLoginItemSettings();
+  const launchedAtLogin = loginItemState.wasOpenedAtLogin ?? false;
+  const launchedWithHiddenFlag = process.argv.some((arg) =>
+    ["--hidden", "--minimized"].includes(arg),
+  );
+
+  applyLoginItemSettings(showWindowOnStartup);
 
   // データベース初期化
   await initDatabase();
@@ -367,10 +357,13 @@ async function initApplication(): Promise<void> {
   await initMCPServices();
 
   // IPC通信ハンドラの初期化
-  setupIpcHandlers();
+  setupIpcHandlers({ getServerManager: () => serverManager });
+
+  const shouldShowMainWindow =
+    (!launchedAtLogin || showWindowOnStartup) && !launchedWithHiddenFlag;
 
   // UI初期化
-  initUI();
+  initUI({ showMainWindow: shouldShowMainWindow });
 }
 
 app.on("ready", initApplication);

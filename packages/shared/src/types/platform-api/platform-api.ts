@@ -4,13 +4,13 @@
 
 import { AuthAPI } from "./domains/auth-api";
 import { ServerAPI } from "./domains/server-api";
-import { AgentAPI } from "./domains/agent-api";
 import { AppAPI } from "./domains/app-api";
 import { PackageAPI } from "./domains/package-api";
 import { SettingsAPI } from "./domains/settings-api";
 import { LogAPI } from "./domains/log-api";
 import { WorkspaceAPI } from "./domains/workspace-api";
 import { WorkflowAPI } from "./domains/workflow-api";
+import { ProjectsAPI } from "./domains/projects-api";
 
 /**
  * Main Platform API interface with domain-driven structure
@@ -22,9 +22,6 @@ export interface PlatformAPI {
 
   // Server management domain
   servers: ServerAPI;
-
-  // Agent management domain (includes chat functionality)
-  agents: AgentAPI;
 
   // Application management domain (includes token management)
   apps: AppAPI;
@@ -43,4 +40,7 @@ export interface PlatformAPI {
 
   // Workflow and Hook Module management domain
   workflows: WorkflowAPI;
+
+  // Projects management domain
+  projects: ProjectsAPI;
 }

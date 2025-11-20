@@ -11,7 +11,7 @@ import {
   GetPromptRequestSchema,
   ListPromptsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { ServerClient } from "@mcp_router/shared";
+import type { ServerClient } from "@mcp_router/shared";
 
 /**
  * Pure MCP Aggregator that combines capabilities from multiple MCP servers
@@ -184,10 +184,17 @@ export class MCPAggregator {
     }
 
     try {
-      return await serverClient.client.callTool({
-        name,
-        arguments: args || {},
-      });
+      return await serverClient.client.callTool(
+        {
+          name,
+          arguments: args || {},
+        },
+        undefined,
+        {
+          timeout: 60 * 60 * 1000, // 60分
+          resetTimeoutOnProgress: true,
+        },
+      );
     } catch (error) {
       console.error(`Failed to call tool ${name}:`, error);
       throw error;

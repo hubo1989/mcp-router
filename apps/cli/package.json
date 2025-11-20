@@ -1,6 +1,6 @@
 {
   "name": "@mcp_router/cli",
-  "version": "0.1.7",
+  "version": "0.2.0",
   "description": "CLI for MCP Router - connect to an MCP HTTP server",
   "main": "dist/mcpr.js",
   "engines": {
@@ -11,9 +11,9 @@
   },
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc --build",
     "start": "node dist/mcpr.js",
-    "dev": "tsc && node dist/mcpr.js",
+    "dev": "tsc --build && node dist/mcpr.js",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts",
@@ -23,7 +23,6 @@
     "publish:npm": "pnpm publish --access public"
   },
   "dependencies": {
-    "@mcp_router/shared": "workspace:^",
     "@modelcontextprotocol/sdk": "^1.18.0",
     "node-fetch": "^3.3.2"
   },

@@ -2,7 +2,7 @@
 // https://www.electronjs.org/docs/latest/tutorial/process-model#preload-scripts
 
 import { contextBridge, ipcRenderer } from "electron";
-import { CreateServerInput } from "@mcp_router/shared";
+import type { CreateServerInput, TokenServerAccess } from "@mcp_router/shared";
 
 // Consolidate everything into one contextBridge call
 
@@ -33,6 +33,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   removeMcpServer: (id: string) => ipcRenderer.invoke("mcp:remove", id),
   updateMcpServerConfig: (id: string, config: any) =>
     ipcRenderer.invoke("mcp:update-config", id, config),
+  listMcpServerTools: (id: string) => ipcRenderer.invoke("mcp:list-tools", id),
+  updateToolPermissions: (id: string, permissions: Record<string, boolean>) =>
+    ipcRenderer.invoke("mcp:update-tool-permissions", id, permissions),
 
   // Package Version Resolution
   resolvePackageVersionsInArgs: (
@@ -70,122 +73,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke("mcp-apps:add", appName),
   deleteMcpApp: (appName: string) =>
     ipcRenderer.invoke("mcp-apps:delete", appName),
-  updateAppServerAccess: (appName: string, serverIds: string[]) =>
-    ipcRenderer.invoke("mcp-apps:update-server-access", appName, serverIds),
+  updateAppServerAccess: (appName: string, serverAccess: TokenServerAccess) =>
+    ipcRenderer.invoke("mcp-apps:update-server-access", appName, serverAccess),
   unifyAppConfig: (appName: string) =>
     ipcRenderer.invoke("mcp-apps:unify", appName),
-
-  // Agent Management
-  listAgents: () => ipcRenderer.invoke("agent:list"),
-  getAgent: (id: string) => ipcRenderer.invoke("agent:get", id),
-  createAgent: (agentConfig: any) =>
-    ipcRenderer.invoke("agent:create", agentConfig),
-  updateAgent: (id: string, config: any) =>
-    ipcRenderer.invoke("agent:update", id, config),
-  deleteAgent: (id: string) => ipcRenderer.invoke("agent:delete", id),
-  shareAgent: (id: string) => ipcRenderer.invoke("agent:share", id),
-  importAgent: (shareCode: string) =>
-    ipcRenderer.invoke("agent:import", shareCode),
-
-  // Agent Deployment
-  deployAgent: (id: string) => ipcRenderer.invoke("agent:deploy", id),
-  getDeployedAgents: () => ipcRenderer.invoke("agent:deployed-list"),
-  updateDeployedAgent: (id: string, config: any) =>
-    ipcRenderer.invoke("agent:deployed-update", id, config),
-  deleteDeployedAgent: (id: string) =>
-    ipcRenderer.invoke("agent:deployed-delete", id),
-
-  // Agent Tool Management
-  getAgentMCPServerTools: (
-    agentId: string,
-    serverId: string,
-    isDev?: boolean,
-  ) =>
-    ipcRenderer.invoke("agent:get-mcp-server-tools", agentId, serverId, isDev),
-  executeAgentTool: (
-    agentId: string,
-    toolName: string,
-    args: Record<string, any>,
-  ) => ipcRenderer.invoke("agent:execute-tools", agentId, toolName, args),
-
-  // Background Chat
-  startBackgroundChat: (
-    sessionId: string | undefined,
-    agentId: string,
-    query: string,
-  ) =>
-    ipcRenderer.invoke(
-      "agent:background-chat-start",
-      sessionId,
-      agentId,
-      query,
-    ),
-  stopBackgroundChat: (agentId: string) =>
-    ipcRenderer.invoke("agent:background-chat-stop", agentId),
-  onBackgroundChatStart: (callback: (data: any) => void) => {
-    const listener = (_: any, data: any) => callback(data);
-    ipcRenderer.on("background-chat:start", listener);
-    return () => {
-      ipcRenderer.removeListener("background-chat:start", listener);
-    };
-  },
-  onBackgroundChatStop: (callback: (data: any) => void) => {
-    const listener = (_: any, data: any) => callback(data);
-    ipcRenderer.on("background-chat:stop", listener);
-    return () => {
-      ipcRenderer.removeListener("background-chat:stop", listener);
-    };
-  },
-
-  // Session Messages (Local Database)
-  getSessions: (agentId: string, options?: any) =>
-    ipcRenderer.invoke("agent:get-sessions", agentId, options),
-  createSession: (agentId: string, initialMessages?: any[]) =>
-    ipcRenderer.invoke("agent:create-session", agentId, initialMessages),
-  updateSessionMessages: (sessionId: string, messages: any[]) =>
-    ipcRenderer.invoke("agent:update-session-messages", sessionId, messages),
-  deleteSession: (sessionId: string) =>
-    ipcRenderer.invoke("agent:delete-session", sessionId),
-
-  // Chat Stream Communication (Background -> Main)
-  sendChatStreamStart: (streamData: any) =>
-    ipcRenderer.invoke("agent:chat-stream-start", streamData),
-  sendChatStreamChunk: (chunkData: any) =>
-    ipcRenderer.invoke("agent:chat-stream-chunk", chunkData),
-  sendChatStreamEnd: (endData: any) =>
-    ipcRenderer.invoke("agent:chat-stream-end", endData),
-  sendChatStreamError: (errorData: any) =>
-    ipcRenderer.invoke("agent:chat-stream-error", errorData),
-
-  // Chat Stream Listeners (Main -> Background)
-  onChatStreamStart: (callback: (data: any) => void) => {
-    const listener = (_: any, data: any) => callback(data);
-    ipcRenderer.on("chat-stream:start", listener);
-    return () => {
-      ipcRenderer.removeListener("chat-stream:start", listener);
-    };
-  },
-  onChatStreamChunk: (callback: (data: any) => void) => {
-    const listener = (_: any, data: any) => callback(data);
-    ipcRenderer.on("chat-stream:chunk", listener);
-    return () => {
-      ipcRenderer.removeListener("chat-stream:chunk", listener);
-    };
-  },
-  onChatStreamEnd: (callback: (data: any) => void) => {
-    const listener = (_: any, data: any) => callback(data);
-    ipcRenderer.on("chat-stream:end", listener);
-    return () => {
-      ipcRenderer.removeListener("chat-stream:end", listener);
-    };
-  },
-  onChatStreamError: (callback: (data: any) => void) => {
-    const listener = (_: any, data: any) => callback(data);
-    ipcRenderer.on("chat-stream:error", listener);
-    return () => {
-      ipcRenderer.removeListener("chat-stream:error", listener);
-    };
-  },
 
   // Command check
   checkCommandExists: (command: string) =>
@@ -275,15 +166,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.removeListener("workspace:switched", listener);
     };
   },
-  // Conversion Queue Monitoring
-  onConversionUpdate: (callback: (job: any) => void) => {
-    const listener = (_: any, job: any) => callback(job);
-    ipcRenderer.on("conversion:update", listener);
-    return () => {
-      ipcRenderer.removeListener("conversion:update", listener);
-    };
-  },
-  getConversionStatus: (jobId: string) =>
-    ipcRenderer.invoke("conversion:status", jobId),
-  setThemeSource: (theme: "light" | "dark" | "system") => ipcRenderer.invoke("ui:set-theme-source", theme),
+
+  // Projects Management
+  listProjects: () => ipcRenderer.invoke("project:list"),
+  createProject: (input: { name: string }) =>
+    ipcRenderer.invoke("project:create", input),
+  updateProject: (id: string, updates: { name?: string }) =>
+    ipcRenderer.invoke("project:update", id, updates),
+  deleteProject: (id: string) => ipcRenderer.invoke("project:delete", id),
+
+  // ThemeSetting
+  setThemeSource: (theme: "light" | "dark" | "system") =>
+    ipcRenderer.invoke("ui:set-theme-source", theme),
 });

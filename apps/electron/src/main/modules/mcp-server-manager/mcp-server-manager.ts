@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { app } from "electron";
-import { MCPServer, MCPServerConfig } from "@mcp_router/shared";
+import { MCPServer, MCPServerConfig, MCPTool } from "@mcp_router/shared";
 import {
   getServerService,
   ServerService,
@@ -67,6 +67,7 @@ export class MCPServerManager {
         // Initialize all servers as stopped when loading
         server.status = "stopped";
         server.logs = [];
+        server.toolPermissions = server.toolPermissions || {};
         this.servers.set(server.id, server);
 
         // Update server name to ID mapping
@@ -74,7 +75,7 @@ export class MCPServerManager {
 
         // Auto start servers if configured
         if (server.autoStart && !server.disabled) {
-          await this.startServer(server.id);
+          await this.startServer(server.id, undefined, false);
         }
       }
 
@@ -192,11 +193,10 @@ export class MCPServerManager {
       const allTokens = tokenManager.listTokens();
 
       for (const token of allTokens) {
-        if (token.serverIds.includes(serverId)) {
-          const updatedServerIds = token.serverIds.filter(
-            (id: string) => id !== serverId,
-          );
-          tokenManager.updateTokenServerAccess(token.id, updatedServerIds);
+        if (serverId in (token.serverAccess || {})) {
+          const updatedServerAccess = { ...(token.serverAccess || {}) };
+          delete updatedServerAccess[serverId];
+          tokenManager.updateTokenServerAccess(token.id, updatedServerAccess);
         }
       }
     } catch (error) {
@@ -210,7 +210,11 @@ export class MCPServerManager {
   /**
    * Start an MCP server
    */
-  public async startServer(id: string, clientId?: string): Promise<boolean> {
+  public async startServer(
+    id: string,
+    clientId?: string,
+    persist: boolean = true,
+  ): Promise<boolean> {
     const server = this.servers.get(id);
     if (!server || server.disabled) {
       throw new Error(server ? "Server is disabled" : "Server not found");
@@ -237,6 +241,11 @@ export class MCPServerManager {
     // Register the client
     this.serverStatusMap.set(server.name, true);
 
+    // Update autoStart if persist is true
+    if (persist) {
+      this.updateServer(id, { autoStart: true });
+    }
+
     // Record log
     getLogService().recordMcpRequestLog({
       timestamp: new Date().toISOString(),
@@ -253,7 +262,11 @@ export class MCPServerManager {
   /**
    * Stop an MCP server
    */
-  public stopServer(id: string, clientId?: string): boolean {
+  public stopServer(
+    id: string,
+    clientId?: string,
+    persist: boolean = true,
+  ): boolean {
     const server = this.servers.get(id);
     if (!server) {
       return false;
@@ -270,6 +283,11 @@ export class MCPServerManager {
 
       // Unregister the client
       this.serverStatusMap.set(server.name, false);
+
+      // Update autoStart if persist is true
+      if (persist) {
+        this.updateServer(id, { autoStart: false });
+      }
 
       // Record log
       getLogService().recordMcpRequestLog({
@@ -314,6 +332,7 @@ export class MCPServerManager {
       const status = server.status;
       const logs = server.logs || [];
       Object.assign(server, updatedServer, { status, logs });
+      server.toolPermissions = server.toolPermissions || {};
       this.updateServerNameMapping(server);
     }
 
@@ -326,21 +345,61 @@ export class MCPServerManager {
   public updateServerToolPermissions(
     id: string,
     toolPermissions: Record<string, boolean>,
-  ): MCPServer | null {
+  ): MCPServer {
     const server = this.servers.get(id);
     if (!server) {
-      return null;
+      throw new Error(`Server not found: ${id}`);
     }
 
     const updatedConfig: Partial<MCPServerConfig> = { toolPermissions };
     const updatedServer = this.serverService.updateServer(id, updatedConfig);
 
     if (!updatedServer) {
-      return null;
+      throw new Error(
+        `Failed to update tool permissions for server: ${server.name}`,
+      );
     }
 
-    server.toolPermissions = toolPermissions;
+    server.toolPermissions = { ...toolPermissions };
+
+    if (Array.isArray(server.tools)) {
+      server.tools = server.tools.map((tool) => ({
+        ...tool,
+        enabled: toolPermissions[tool.name] !== false,
+      }));
+    }
+
     return server;
+  }
+
+  /**
+   * List tools for a specific server
+   */
+  public async listServerTools(id: string): Promise<MCPTool[]> {
+    const server = this.servers.get(id);
+    if (!server) {
+      throw new Error("Server not found");
+    }
+
+    const client = this.clients.get(id);
+    const isRunning =
+      !!client &&
+      (server.status === "running" || this.serverStatusMap.get(server.name));
+
+    if (!isRunning || !client) {
+      throw new Error("Server must be running to list tools");
+    }
+
+    const response = await client.listTools();
+    const tools = response?.tools ?? [];
+    const permissions = server.toolPermissions || {};
+    const toolsWithStatus = tools.map((tool) => ({
+      ...tool,
+      enabled: permissions[tool.name] !== false,
+    }));
+
+    server.tools = toolsWithStatus;
+    return toolsWithStatus;
   }
 
   /**
@@ -415,7 +474,8 @@ export class MCPServerManager {
    */
   public async shutdown(): Promise<void> {
     for (const [id] of this.clients) {
-      this.stopServer(id);
+      // Don't persist state changes when shutting down - this is just cleanup
+      this.stopServer(id, undefined, false);
     }
   }
 }

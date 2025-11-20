@@ -16,12 +16,15 @@
 **MCP Router** is a desktop application for simplifies the management of Model Context Protocol (MCP) servers.
 
 ### ✨ Key Features
-- 🌐 **Universal** - Connect to any MCP server
+
+- 🌐 **Universal** — Connect to any MCP server
   - Remote or local servers
   - Supports DXT, JSON, Manual
-- 🖥️ **Cross-platform** - Available for Windows and macOS
-- 🔒 **Privacy** - All data is stored locally on your device
-- ⬆️ **Data portability** - Easily export and import your mcp configurations
+- 🖥️ **Cross-platform** — Windows and macOS
+- 🗂 **Context Management** — Keep growing MCP server contexts organized
+  - Group MCP servers into Projects
+  - Manage modes with Workspaces (like browser profiles)
+  - Toggle tools on/off per server
 
 ## 🔒 Privacy & Security
 
@@ -40,13 +43,30 @@
 
 Download from our [releases page](https://github.com/mcp-router/mcp-router/releases).
 
+After setting up MCP Router, you can connect to MCP Router using the CLI:
+```bash
+# Set your MCP Router token (Issued when adding a custom app)
+export MCPR_TOKEN="mcpr_your_token"
+# To connect to MCP Router, run:
+npx -y @mcp_router/cli connect
+
+# If you want to use project, run:
+npx -y @mcp_router/cli connect --project <project-name>
+```
 
 ## 🚀 Features
 
 ### 📊 Centralized Server Management
-Easily toggle MCP servers on/off from a single dashboard
+Easily toggle MCP servers on/off, enable/disable individual tools, and organize servers into Projects and Workspaces — all from a single dashboard
 
 <img src="https://raw.githubusercontent.com/mcp-router/mcp-router/main/public/images/readme/toggle.png" alt="Server Management" width="600">
+
+<img src="https://raw.githubusercontent.com/mcp-router/mcp-router/main/public/images/readme/tool-toggle.png" alt="Toggle Tool" width="600">
+
+<img src="https://raw.githubusercontent.com/mcp-router/mcp-router/main/public/images/readme/project-management.png" alt="Project Management" width="600">
+
+<img src="https://raw.githubusercontent.com/mcp-router/mcp-router/main/public/images/readme/workspace.png" alt="Workspace Management" width="600">
+
 
 ### 🌐 Universal Connectivity
 Add and connect to any MCP server with support for both local and remote servers
@@ -71,6 +91,8 @@ Join our community to get help, share ideas, and stay updated:
 - 💬 [Discord Community](https://discord.com/invite/dwG9jPrhxB)
 - 🐦 [Follow us on X (Twitter)](https://x.com/mcp_router)
 - ⭐ [Star us on GitHub](https://github.com/mcp-router/mcp-router)
+
+[![Star History Chart](https://api.star-history.com/svg?repos=mcp-router/mcp-router&type=date&legend=top-left)](https://www.star-history.com/#mcp-router/mcp-router&type=date&legend=top-left)
 
 ## 📝 License
 

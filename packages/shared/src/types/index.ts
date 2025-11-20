@@ -8,6 +8,7 @@ export * from "./token-types";
 export * from "./user-types";
 export * from "./workspace";
 export * from "./auth";
+export * from "./project-types";
 
 // Re-export organized domain types
 export * from "./ui";
@@ -23,8 +24,6 @@ export {
   ServerAPI,
   ServerStatus,
   CreateServerInput,
-  // Agent API
-  AgentAPI,
   // App API
   AppAPI,
   // Package API
@@ -35,6 +34,8 @@ export {
   LogAPI,
   LogQueryOptions,
   LogQueryResult,
+  // Projects API
+  ProjectsAPI,
   // Workspace API
   WorkspaceAPI,
   // Workflow API
@@ -46,6 +47,5 @@ export { LogEntry as PlatformLogEntry } from "./platform-api";
 export * from "./mcp-apps";
 export * from "./utils";
 export * from "./cli";
-export * from "./chat-types";
 export * from "./workflow-types";
 export * from "./shared-config";

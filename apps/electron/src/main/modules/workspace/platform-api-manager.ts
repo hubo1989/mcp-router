@@ -8,9 +8,6 @@ import {
 import { getDatabaseContext } from "./database-context";
 import { MainDatabaseMigration } from "../../infrastructure/database/main-database-migration";
 import { getSharedConfigManager } from "../../infrastructure/shared-config-manager";
-import { AgentRepository } from "../agent/agent-repository";
-import { DeployedAgentRepository } from "../agent/deployed-agent-repository";
-import { SessionRepository } from "../agent/session-repository";
 import { McpLoggerRepository } from "../mcp-logger/mcp-logger.repository";
 import { McpServerManagerRepository } from "../mcp-server-manager/mcp-server-manager.repository";
 import { SettingsRepository } from "../settings/settings.repository";
@@ -20,11 +17,11 @@ import { ServerService } from "@/main/modules/mcp-server-manager/server-service"
 import { McpAppsManagerService } from "../mcp-apps-manager/mcp-apps-manager.service";
 import { McpLoggerService } from "@/main/modules/mcp-logger/mcp-logger.service";
 import { SettingsService } from "../settings/settings.service";
-import {
-  DevelopmentAgentService,
-  DeployedAgentService,
-  AgentSharingService,
-} from "@/main/modules/agent";
+import type { MCPServerManager } from "@/main/modules/mcp-server-manager/mcp-server-manager";
+import { WorkflowRepository } from "../workflow/workflow.repository";
+import { HookRepository } from "../workflow/hook.repository";
+import { WorkflowService } from "../workflow/workflow.service";
+import { HookService } from "../workflow/hook.service";
 
 /**
  * Platform API管理クラス
@@ -35,6 +32,7 @@ export class PlatformAPIManager {
   private currentWorkspace: Workspace | null = null;
   private currentDatabase: SqliteManager | null = null;
   private mainWindow: BrowserWindow | null = null;
+  private getServerManager?: () => MCPServerManager;
 
   public static getInstance(): PlatformAPIManager {
     if (!PlatformAPIManager.instance) {
@@ -55,6 +53,13 @@ export class PlatformAPIManager {
    */
   setMainWindow(window: BrowserWindow): void {
     this.mainWindow = window;
+  }
+
+  /**
+   * MCPServerManager プロバイダを設定
+   */
+  setServerManagerProvider(provider: () => MCPServerManager): void {
+    this.getServerManager = provider;
   }
 
   /**
@@ -111,38 +116,29 @@ export class PlatformAPIManager {
     // グローバルなワークスペースデータベース参照を設定
     setWorkspaceDatabase(newDatabase);
 
-    // マイグレーションを実行
-    // メインDBの場合のみマイグレーションを実行
-    if (workspace.localConfig?.databasePath === "mcprouter.db") {
-      const migration = new MainDatabaseMigration(newDatabase);
-      migration.runMigrations();
-    }
-    // ワークスペースDBの初期化は各リポジトリが自動的に行う
+    // マイグレーションを実行（全ワークスペースで実行）
+    const migration = new MainDatabaseMigration(newDatabase);
+    migration.runMigrations();
 
     // リポジトリをリセット（新しいデータベースを使用するように）
-    AgentRepository.resetInstance();
-    DeployedAgentRepository.resetInstance();
     McpLoggerRepository.resetInstance();
     McpServerManagerRepository.resetInstance();
-    SessionRepository.resetInstance();
     SettingsRepository.resetInstance();
     McpAppsManagerRepository.resetInstance();
     WorkspaceRepository.resetInstance();
+    WorkflowRepository.resetInstance();
+    HookRepository.resetInstance();
 
     // サービスのシングルトンインスタンスもリセット
     ServerService.resetInstance();
     McpAppsManagerService.resetInstance();
     McpLoggerService.resetInstance();
     SettingsService.resetInstance();
-    DevelopmentAgentService.resetInstance();
-    DeployedAgentService.resetInstance();
-    AgentSharingService.resetInstance();
-
-    // MCPServerManagerとAggregatorServerの再初期化をトリガー
-    // グローバル変数からMCPServerManagerを取得して再初期化
-    const getMCPServerManager = (global as any).getMCPServerManager;
-    if (getMCPServerManager && typeof getMCPServerManager === "function") {
-      const serverManager = getMCPServerManager();
+    WorkflowService.resetInstance();
+    HookService.resetInstance();
+    // MCPServerManagerの再初期化をトリガー
+    if (this.getServerManager) {
+      const serverManager = this.getServerManager();
       if (
         serverManager &&
         typeof serverManager.initializeAsync === "function"
@@ -153,25 +149,18 @@ export class PlatformAPIManager {
     }
 
     // 新しいワークスペースのサーバーIDを取得してトークンを同期
-
-    const serverRows = newDatabase.all<{ id: string }>(
-      "SELECT id FROM servers",
-    );
-    const serverIds = serverRows.map((row) => row.id);
-
-    if (serverIds.length > 0) {
-      getSharedConfigManager().syncTokensWithWorkspaceServers(serverIds);
+    // リポジトリ経由で取得し、テーブル初期化を確実化する
+    let serverList: string[] = [];
+    try {
+      const serverRepo = McpServerManagerRepository.getInstance();
+      serverList = serverRepo.getAllServers().map((s) => s.id);
+    } catch (e) {
+      console.error("Failed to load servers via repository for token sync:", e);
+      serverList = [];
     }
-    // AggregatorServerの再初期化
-    const getAggregatorServer = (global as any).getAggregatorServer;
-    if (getAggregatorServer && typeof getAggregatorServer === "function") {
-      const aggregatorServer = getAggregatorServer();
-      if (
-        aggregatorServer &&
-        typeof aggregatorServer.initAgentToolsServer === "function"
-      ) {
-        aggregatorServer.initAgentToolsServer();
-      }
+
+    if (serverList.length > 0) {
+      getSharedConfigManager().syncTokensWithWorkspaceServers(serverList);
     }
   }
 
@@ -180,9 +169,8 @@ export class PlatformAPIManager {
    */
   private async handleWorkspaceSwitch(workspace: Workspace): Promise<void> {
     // 先に現在のワークスペースのサーバーを停止
-    const getMCPServerManager = (global as any).getMCPServerManager;
-    if (getMCPServerManager && typeof getMCPServerManager === "function") {
-      const serverManager = getMCPServerManager();
+    if (this.getServerManager) {
+      const serverManager = this.getServerManager();
       // 現在のワークスペースでサーバーを停止（ログは現在のDBに記録される）
       serverManager.clearAllServers();
     }

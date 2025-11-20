@@ -2,11 +2,14 @@
  * Augment the global Window interface so TypeScript knows about "window.electronAPI".
  */
 
-import { AppSettings } from "@mcp_router/shared";
+import type {
+  AppSettings,
+  MCPTool,
+  MCPServer,
+  Project,
+  TokenServerAccess,
+} from "@mcp_router/shared";
 import {
-  Agent,
-  AgentConfig,
-  DeployedAgent,
   CreateServerInput,
   WorkflowDefinition,
   HookModule,
@@ -42,6 +45,11 @@ declare global {
       serverSelectFile: (options: any) => Promise<any>;
       removeMcpServer: (id: string) => Promise<any>;
       updateMcpServerConfig: (id: string, config: any) => Promise<any>;
+      listMcpServerTools: (id: string) => Promise<MCPTool[]>;
+      updateToolPermissions: (
+        id: string,
+        permissions: Record<string, boolean>,
+      ) => Promise<MCPServer>;
 
       getRequestLogs: (options?: {
         clientId?: string;
@@ -74,33 +82,12 @@ declare global {
       [key: string]: any;
       updateAppServerAccess: (
         appName: string,
-        serverIds: string[],
+        serverAccess: TokenServerAccess,
       ) => Promise<McpAppsManagerResult>;
       unifyAppConfig: (appName: string) => Promise<McpAppsManagerResult>;
 
       // Command checking
       checkCommandExists: (command: string) => Promise<boolean>;
-
-      // Agent Management
-      listAgents: () => Promise<Agent[]>;
-      getAgent: (id: string) => Promise<Agent | undefined>;
-      createAgent: (agentConfig: Omit<AgentConfig, "id">) => Promise<Agent>;
-      updateAgent: (
-        id: string,
-        config: Partial<AgentConfig>,
-      ) => Promise<Agent | undefined>;
-      deleteAgent: (id: string) => Promise<boolean>;
-      shareAgent: (id: string) => Promise<string>;
-      importAgent: (shareCode: string) => Promise<DeployedAgent | undefined>;
-
-      // Agent Deployment
-      deployAgent: (id: string) => Promise<DeployedAgent | undefined>;
-      getDeployedAgents: () => Promise<DeployedAgent[] | undefined>;
-      updateDeployedAgent: (
-        id: string,
-        config: any,
-      ) => Promise<DeployedAgent | undefined>;
-      deleteDeployedAgent: (id: string) => Promise<boolean>;
 
       // Package Version Resolution
       resolvePackageVersionsInArgs: (
@@ -114,63 +101,6 @@ declare global {
         success: boolean;
         updates?: ServerPackageUpdates;
       }>;
-
-      // Agent Tool Management
-      getAgentMCPServerTools: (
-        agentId: string,
-        serverId: string,
-        isDev?: boolean,
-      ) => Promise<{ success: boolean; tools: any[]; error?: string }>;
-      executeAgentTool: (
-        agentId: string,
-        toolName: string,
-        args: Record<string, any>,
-      ) => Promise<{ success: boolean; result?: any; error?: string }>;
-
-      // Background Chat
-      startBackgroundChat: (
-        sessionId: string | undefined,
-        agentId: string,
-        query: string,
-      ) => Promise<{ success: boolean; error?: string }>;
-      stopBackgroundChat: (
-        agentId: string,
-      ) => Promise<{ success: boolean; error?: string }>;
-      onBackgroundChatStart: (callback: (data: any) => void) => () => void;
-      onBackgroundChatStop: (callback: (data: any) => void) => () => void;
-
-      // Session Messages (Local Database)
-      fetchSessionMessages: (sessionId: string) => Promise<any[]>;
-      getSessions: (
-        agentId: string,
-        options?: any,
-      ) => Promise<{ sessions: any[]; hasMore: boolean; nextCursor?: string }>;
-      createSession: (agentId: string, initialMessages?: any[]) => Promise<any>;
-      updateSessionMessages: (
-        sessionId: string,
-        messages: any[],
-      ) => Promise<any>;
-      deleteSession: (sessionId: string) => Promise<boolean>;
-
-      // Chat Stream Communication (Background -> Main)
-      sendChatStreamStart: (
-        streamData: any,
-      ) => Promise<{ success: boolean; error?: string }>;
-      sendChatStreamChunk: (
-        chunkData: any,
-      ) => Promise<{ success: boolean; error?: string }>;
-      sendChatStreamEnd: (
-        endData: any,
-      ) => Promise<{ success: boolean; error?: string }>;
-      sendChatStreamError: (
-        errorData: any,
-      ) => Promise<{ success: boolean; error?: string }>;
-
-      // Chat Stream Listeners (Main -> Background)
-      onChatStreamStart: (callback: (data: any) => void) => () => void;
-      onChatStreamChunk: (callback: (data: any) => void) => () => void;
-      onChatStreamEnd: (callback: (data: any) => void) => () => void;
-      onChatStreamError: (callback: (data: any) => void) => () => void;
 
       // Feedback
       submitFeedback: (feedback: string) => Promise<boolean>;
@@ -211,6 +141,15 @@ declare global {
       ) => Promise<{ token: string | null }>;
       onWorkspaceSwitched: (callback: (workspace: any) => void) => () => void;
       onWorkspaceConfigChanged: (callback: (config: any) => void) => () => void;
+
+      // Projects Management
+      listProjects: () => Promise<Project[]>;
+      createProject: (input: { name: string }) => Promise<Project>;
+      updateProject: (
+        id: string,
+        updates: { name?: string },
+      ) => Promise<Project>;
+      deleteProject: (id: string) => Promise<void>;
 
       // Workflow Management
       listWorkflows: () => Promise<WorkflowDefinition[]>;
