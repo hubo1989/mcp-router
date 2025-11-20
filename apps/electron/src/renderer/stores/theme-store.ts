@@ -13,12 +13,12 @@ export const createThemeStore = (
     theme: "system",
     setTheme: (theme: Theme) => {
       set({ theme });
-      applyTheme(theme);
 
       if (typeof window === "undefined") {
         return;
       }
 
+      applyTheme(theme);
       // Persist theme to settings via PlatformAPI
       try {
         const platformAPI = getPlatformAPI();
