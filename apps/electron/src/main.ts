@@ -17,6 +17,7 @@ import { getIsAutoUpdateInProgress } from "./main/modules/system/system-handler"
 import { initializeEnvironment, isDevelopment } from "@/main/utils/environment";
 import {
   applyLoginItemSettings,
+  applyThemeSettings,
   getSettingsService,
 } from "@/main/modules/settings/settings.service";
 
@@ -335,6 +336,7 @@ async function initApplication(): Promise<void> {
   try {
     const currentSettings = settingsService.getSettings();
     showWindowOnStartup = currentSettings.showWindowOnStartup ?? true;
+    applyThemeSettings(currentSettings.theme);
   } catch (error) {
     console.error(
       "Failed to load startup visibility preference, defaulting to true:",

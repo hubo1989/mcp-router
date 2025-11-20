@@ -174,8 +174,4 @@ contextBridge.exposeInMainWorld("electronAPI", {
   updateProject: (id: string, updates: { name?: string }) =>
     ipcRenderer.invoke("project:update", id, updates),
   deleteProject: (id: string) => ipcRenderer.invoke("project:delete", id),
-
-  // ThemeSetting
-  setThemeSource: (theme: "light" | "dark" | "system") =>
-    ipcRenderer.invoke("ui:set-theme-source", theme),
 });
