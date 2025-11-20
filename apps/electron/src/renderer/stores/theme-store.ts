@@ -67,24 +67,19 @@ export function initializeThemeStore(
     return;
   }
 
-  // Apply a sensible default immediately
-  applyTheme("system");
-
   try {
     const platformAPI = getPlatformAPI();
-    platformAPI.settings
-      .get()
-      .then((settings) => {
-        const initialTheme: Theme = settings.theme ?? "system";
-        // Update store state and apply theme without persisting again
-        useThemeStore.setState({ theme: initialTheme });
-        applyTheme(initialTheme);
-      })
-      .catch((error) => {
-        console.error("Failed to initialize theme from settings:", error);
-      });
+    platformAPI.settings.get().then((settings) => {
+      const initialTheme: Theme = settings.theme ?? "system";
+      // Update store state and apply theme without persisting again
+      useThemeStore.setState({ theme: initialTheme });
+      applyTheme(initialTheme);
+    });
   } catch (error) {
-    console.error("Failed to access PlatformAPI for theme initialization:", error);
+    console.error(
+      "Failed to access PlatformAPI for theme initialization:",
+      error,
+    );
   }
 
   // Listen for system theme changes while in "system" mode
